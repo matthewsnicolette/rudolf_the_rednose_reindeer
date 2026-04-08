@@ -1,75 +1,86 @@
-"""
-Generic CSV evaluation script.
-Converted and generalised from the original notebook so it can be reused for
-any CSV file, regardless of the number of rows or columns.
-"""
-
-from pathlib import Path
-import sys
+import streamlit as st
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
+try:
+    from ydata_profiling import ProfileReport
+    from streamlit_pandas_profiling import st_profile_report
+    PROFILING_AVAILABLE = True
+except ImportError:
+    PROFILING_AVAILABLE = False
 
-def load_data(csv_file: str) -> pd.DataFrame:
-    """Load any CSV file using a few common encodings."""
-    encodings = ["utf-8", "latin1", "cp1252"]
-    last_error = None
+st.set_page_config(page_title="CSV Evaluator", layout="wide")
 
-    for enc in encodings:
-        try:
-            return pd.read_csv(csv_file, encoding=enc)
-        except Exception as exc:
-            last_error = exc
+st.title("Generic CSV Evaluation App")
+st.write("Upload any CSV file for summary, exploration, and profiling.")
 
-    raise last_error
+uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
 
+if uploaded_file is not None:
+    try:
+        df = pd.read_csv(uploaded_file)
 
-def evaluate_csv(df: pd.DataFrame) -> None:
-    """Print a generic summary for any tabular CSV dataset."""
-    print("\n=== DATA PREVIEW ===")
-    print(df.head())
+        st.success("File uploaded successfully.")
 
-    print("\n=== DATASET SHAPE ===")
-    print(f"Rows: {df.shape[0]}")
-    print(f"Columns: {df.shape[1]}")
+        st.subheader("Dataset Preview")
+        st.dataframe(df)
 
-    print("\n=== COLUMN NAMES ===")
-    print(list(df.columns))
+        st.subheader("Dataset Shape")
+        st.write(f"Rows: {df.shape[0]}")
+        st.write(f"Columns: {df.shape[1]}")
 
-    print("\n=== DATA TYPES ===")
-    print(df.dtypes)
+        st.subheader("Column Information")
+        col_info = pd.DataFrame({
+            "Column": df.columns,
+            "Data Type": df.dtypes.astype(str).values,
+            "Missing Values": df.isnull().sum().values,
+            "Missing %": ((df.isnull().sum() / len(df)) * 100).round(2).values,
+            "Unique Values": df.nunique().values
+        })
+        st.dataframe(col_info)
 
-    print("\n=== MISSING VALUES ===")
-    print(df.isnull().sum())
+        st.subheader("Duplicate Rows")
+        st.write(f"Number of duplicate rows: {df.duplicated().sum()}")
 
-    print("\n=== DUPLICATE ROWS ===")
-    print(df.duplicated().sum())
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
-    print("\n=== DESCRIBE (ALL COLUMNS) ===")
-    print(df.describe(include="all").transpose())
+        if numeric_cols:
+            st.subheader("Numeric Summary Statistics")
+            st.dataframe(df[numeric_cols].describe().T)
 
-    numeric_cols = df.select_dtypes(include="number").columns.tolist()
-    if numeric_cols:
-        print("\n=== CORRELATION MATRIX (NUMERIC COLUMNS ONLY) ===")
-        print(df[numeric_cols].corr(numeric_only=True))
-    else:
-        print("\n=== CORRELATION MATRIX ===")
-        print("No numeric columns available.")
+            st.subheader("Basic Visualisation")
+            selected_col = st.selectbox("Choose a numeric column to plot", numeric_cols)
 
+            fig, ax = plt.subplots()
+            ax.hist(df[selected_col].dropna(), bins=20)
+            ax.set_title(f"Histogram of {selected_col}")
+            ax.set_xlabel(selected_col)
+            ax.set_ylabel("Frequency")
+            st.pyplot(fig)
+        else:
+            st.info("No numeric columns found for plotting.")
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python Python_Workshop_converted.py <path_to_csv>")
-        sys.exit(1)
+        st.subheader("Missing Values Summary")
+        missing_df = pd.DataFrame({
+            "Column": df.columns,
+            "Missing Values": df.isnull().sum().values
+        })
+        st.dataframe(missing_df)
 
-    csv_path = Path(sys.argv[1])
+        st.subheader("Generate Profiling Report")
+        if PROFILING_AVAILABLE:
+            if st.button("Create Profiling Report"):
+                with st.spinner("Generating report..."):
+                    profile = ProfileReport(df, explorative=True)
+                    st_profile_report(profile)
+        else:
+            st.warning(
+                "ydata-profiling is not installed. Add 'ydata-profiling' and "
+                "'streamlit-pandas-profiling' to requirements.txt."
+            )
 
-    if not csv_path.exists():
-        print(f"File not found: {csv_path}")
-        sys.exit(1)
-
-    df = load_data(str(csv_path))
-    evaluate_csv(df)
-
-
-if __name__ == "__main__":
-    main()
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
+else:
+    st.info("Please upload a CSV file to begin.")
